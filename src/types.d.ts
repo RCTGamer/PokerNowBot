@@ -7,9 +7,18 @@ type Action = {
     raiseAmount?: RaiseAmount,
 };
 
-type ChromeMessage = "start_bot" | "kill_bot" | "get_bot_status";
+type ChromeMessage = "start_bot" | "kill_bot" | "get_bot_status" | "open_debug" | "get_debug";
 
 type BotStatus = "playing" | "off";
+
+type BotDebug = {
+    /** Total auto-folds the bot has dispatched since the page loaded. */
+    foldCount: number,
+    /** Encoded key of the most recent hand the bot auto-folded, e.g. "72o". */
+    lastFoldKey: string | null,
+    /** Encoded key of the most recent preflop hand that triggered a beep, e.g. "AKs". */
+    lastBeepKey: string | null,
+};
 
 type CardValueCode = 14 | 13 | 12 | 11 | 10 | 9 | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0;
 type CardValueName = "A" | "K" | "Q" | "J" | "10" | "9" | "8" | "7" | "6" | "5" | "4" | "3" | "2";

@@ -1,63 +1,98 @@
 /**
  * @module autoFoldLogic
- * @description Preflop auto-fold safety net. Folds junk hole cards preflop so the
- * rest of the AI pipeline (ifThenElseAction) only sees hands worth playing.
+ * @description Preflop auto-fold + soft "your-turn" beep. The two decisions
+ * for a NEW preflop hand are co-located here so the popup's red/green grid is
+ * the single source of truth:
  *
- * On any post-flop street this returns null — the regular decision flow handles those.
+ *   - hand key is in `foldSet` (red cell)  → auto-fold on the bot's turn
+ *   - hand key is NOT in `foldSet` (green) → call playBeep() once so the user
+ *                                            knows to make a manual decision
+ *
+ * The fold set is stored in module state, refreshed by main.ts when
+ * chrome.storage.local changes. The beep volume is owned by beep.ts.
+ *
+ * On any post-flop street this module is a no-op — the regular decision flow
+ * handles those.
  */
 
 import { PreflopPhase } from "../state";
-import { AceCode, KingCode, QueenCode, JackCode } from "../cards";
+import { encodeHand, DEFAULT_PLAYABLE_HANDS } from "./preflopHand";
+import { playBeep } from "../beep";
 
 /**
- * Decide whether the current preflop hand is worth playing.
- *
- * Playable set (conservative):
- *   - Any pair 77+
- *   - AK, AQ, AJ, AT (any suit)
- *   - KQ, KJ (any suit), KJs only
- *   - QJs
- *   - Suited connectors 87s, 76s
- *
- * Everything else is folded. This is intentionally tight; the bot's job here
- * is to not bleed chips on 72o / K2o / etc.
+ * Enumerates all 169 canonical preflop hands. Order:
+ *   - 13 pairs (AA, KK, … 22)
+ *   - 78 suited combinations
+ *   - 78 offsuit combinations
  */
-function isPlayablePreflop(hand: Card[]): boolean {
-    if (hand.length !== 2) return false;
+export const ALL_HANDS: readonly string[] = enumerateAllHands();
 
-    const [a, b] = hand;
-    const hi = Math.max(a.value.code, b.value.code);
-    const lo = Math.min(a.value.code, b.value.code);
-    const suited = a.suit === b.suit;
-    const paired = hi === lo;
+function enumerateAllHands(): readonly string[] {
+    const out: string[] = [];
+    const values = [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2];
 
-    // Pairs 77 and up.
-    if (paired && hi >= 7) return true;
+    for (const v of values)
+        out.push(valueToName(v) + valueToName(v)); // pairs
 
-    // Broadways: AK, AQ, AJ, AT.
-    if (hi === AceCode && lo >= 10 && lo <= KingCode) return true;
-
-    // KQ, KJ offsuit and suited.
-    if (hi === KingCode && (lo === QueenCode || lo === JackCode)) return true;
-
-    // QJ suited only (QJo is marginal, fold).
-    if (hi === QueenCode && lo === JackCode && suited) return true;
-
-    // A small set of suited connectors — keep tight.
-    if (suited) {
-        // 87s, 76s
-        if (hi === 8 && lo === 7) return true;
-        if (hi === 7 && lo === 6) return true;
+    for (let i = 0; i < values.length; i++) {
+        for (let j = i + 1; j < values.length; j++) {
+            const hi = values[i];
+            const lo = values[j];
+            out.push(valueToName(hi) + valueToName(lo) + "s");
+            out.push(valueToName(hi) + valueToName(lo) + "o");
+        }
     }
 
-    return false;
+    return out;
+}
+
+function valueToName(code: number): string {
+    if (code === 14) return "A";
+    if (code === 13) return "K";
+    if (code === 12) return "Q";
+    if (code === 11) return "J";
+    if (code === 10) return "T";
+    return String(code);
+}
+
+/**
+ * The set of preflop hands to auto-fold, keyed by their canonical name
+ * (e.g. "AKo", "TT", "76s"). Refreshed via setFoldSet().
+ *
+ * Initialized to the complement of DEFAULT_PLAYABLE_HANDS so the bot behaves
+ * the same as the pre-upgrade version out of the box.
+ */
+let foldSet: Set<string> = new Set(
+    ALL_HANDS.filter(k => !DEFAULT_PLAYABLE_HANDS.has(k)),
+);
+
+/**
+ * Replace the in-memory fold set. Called by main.ts on startup and on
+ * chrome.storage changes.
+ */
+export function setFoldSet(keys: Iterable<string>) {
+    foldSet = new Set(keys);
+}
+
+/**
+ * Returns the current fold set as an array (for persistence to storage).
+ */
+export function getFoldSet(): string[] {
+    return Array.from(foldSet);
+}
+
+/**
+ * Returns true if the given hand should be auto-folded preflop.
+ * Always returns false outside the preflop phase.
+ */
+export function shouldAutoFold(hand: Card[]): boolean {
+    if (hand.length !== 2) return false;
+    return foldSet.has(encodeHand(hand));
 }
 
 /**
  * Returns a fold action if the current state warrants an immediate auto-fold,
  * otherwise null so the calling AI can proceed with its normal decision flow.
- *
- * Currently only acts preflop. Post-flop decisions are left to ifThenElseAction.
  */
 export function calculateFoldAction(state: State): Action | null {
     // Only act preflop — this is an auto-fold-preflop bot.
@@ -65,14 +100,75 @@ export function calculateFoldAction(state: State): Action | null {
         return null;
     }
 
-    // Defensive: if we somehow don't have two hole cards yet, don't fold.
     if (state.hand.length !== 2) {
         return null;
     }
 
-    if (!isPlayablePreflop(state.hand)) {
+    if (shouldAutoFold(state.hand)) {
         return { type: "check_or_fold" };
     }
 
     return null;
+}
+
+// ---------------------------------------------------------------------------
+// Beep
+// ---------------------------------------------------------------------------
+
+/**
+ * Tracks the hand key we last evaluated so we don't beep on every 500ms tick
+ * while the user stares at the same hole cards. Reset by `resetBeepTracker()`
+ * when the bot stops (or on first call).
+ */
+let lastBeepedHandKey: string | undefined;
+
+/**
+ * Toggled by main.ts in response to the popup's "beep on hands you play"
+ * checkbox. Defaults to true to match the previous main.ts behaviour.
+ */
+let beepEnabled = true;
+
+/** Replace the in-memory beep-enabled flag. Called by main.ts on storage changes. */
+export function setBeepEnabled(enabled: boolean) {
+    beepEnabled = !!enabled;
+}
+
+/** Forget the last hand key we beeped for. Call when the bot stops. */
+export function resetBeepTracker() {
+    lastBeepedHandKey = undefined;
+}
+
+/**
+ * On each tick, when a NEW preflop hand appears, decide once:
+ *   - red  (hand in fold set)  → silence (the bot will auto-fold; see
+ *                                 calculateFoldAction). The popup calls the
+ *                                 fold button via performAction().
+ *   - green (hand NOT in fold set) → call playBeep() once so the user knows
+ *                                     to make a manual decision.
+ *
+ * "New" is defined as a hand key that differs from the last one we evaluated,
+ * so re-ticks of the same hand don't re-beep.
+ *
+ * @returns the hand key that was beeped for, or null if no beep was played.
+ */
+export function playBeepForHand(state: State): string | null {
+    if (!beepEnabled)
+        return null;
+
+    if (state.phase.code !== PreflopPhase.code)
+        return null;
+    if (state.hand.length !== 2)
+        return null;
+
+    const handKey = encodeHand(state.hand);
+
+    if (handKey === lastBeepedHandKey)
+        return null;
+    lastBeepedHandKey = handKey;
+
+    if (shouldAutoFold(state.hand))
+        return null; // red cell → bot will fold; stay silent
+
+    playBeep();
+    return handKey;
 }

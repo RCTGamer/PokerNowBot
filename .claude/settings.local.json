@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(npx tsc *)",
-      "Bash(npx webpack *)"
+      "Bash(npx webpack *)",
+      "Bash(node verify_autofold.js)",
+      "Bash(node verify_beep.js)"
     ]
   }
 }

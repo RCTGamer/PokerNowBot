@@ -10,6 +10,7 @@ module.exports = {
     entry: {
         popup: './src/pages/popup.ts',
         main: './src/main.ts',
+        debug: './src/debug.ts',
     },
     module: {
         rules: [{
