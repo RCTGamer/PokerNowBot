@@ -1,240 +1,395 @@
-# Poker AI Assistant – Research & Implementation
+# PokerNowBot - AI Poker Bot for PokerNow.club
 
-This repository contains a research‑based implementation of a poker‑AI assistant that focuses on:
-
-* **Opponent ranging** – Bayesian updating of a probability distribution over opponent hole‑card combinations.
-* **Expected Value (EV) calculation** – Monte‑Carlo simulation to estimate the value of folding, calling, or raising.
-* **Stack‑to‑Pot Ratio (SPR) analysis** – Computation of SPR and strategic recommendations based on its value.
-* **Explainable output** – Human‑readable justification for the recommended action.
-
-The code is written in Python (no external dependencies beyond the optional `deuces` library for accurate hand evaluation) and is organized as a small library that can be imported into any poker‑bot or analysis tool.
-
----
-
-## Table of Contents
-1. [Project Structure](#project-structure)  
-2. [Core Concepts](#core-concepts)  
-   1. Opponent Ranging  
-   2. EV Calculation  
-   3. SPR & Bet‑Sizing  
-   4. Explanations  
-3. [How to Use](#how-to-use)  
-4. [Example Walkthrough](#example-walkthrough)  
-5. [Extending the Assistant](#extending-the-assistant)  
-6. [References & Further Reading](#references--further-reading)
-
----
+A Chrome extension that plays poker on PokerNow.club automatically, plus a Python-based poker assistant library for opponent modeling and EV calculations.
 
 ## Project Structure
+
 ```
-poker_assistant/
+PokerNowBot/
+├── src/                          # TypeScript Chrome Extension
+│   ├── main.ts                   # Extension entry point, bot loop
+│   ├── ai/
+│   │   ├── ai.ts                 # Main AI entry point (preflop auto-fold + postflop logic)
+│   │   ├── autoFoldLogic.ts      # Preflop auto-fold + beep notifications
+│   │   ├── ifThenElse/           # Rule-based postflop decision engine
+│   │   │   ├── ifThenElseAi.ts   # Main decision router by hand rank
+│   │   │   ├── preflopActions.ts # Preflop decisions
+│   │   │   ├── pairAction.ts     # Pair decisions
+│   │   │   ├── twoPairAction.ts  # Two pair decisions
+│   │   │   ├── threeAction.ts    # Trips/Set decisions
+│   │   │   ├── straightAction.ts # Straight decisions
+│   │   │   ├── flushAction.ts    # Flush decisions
+│   │   │   ├── highCardAction.ts # High card decisions
+│   │   │   └── handActions.ts    # Best hand / bluff actions
+│   │   ├── probabilisticAction.ts # Probabilistic action selection
+│   │   ├── preflopHand.ts        # Hand encoding (169 canonical hands)
+│   │   └── aiUtils.ts            # Hand evaluation utilities
+│   ├── logger.ts                 # Chrome extension logger (downloads JSON logs)
+│   ├── action.ts                 # Action execution & sanitization
+│   ├── ui.ts                     # DOM scraping & state extraction
+│   ├── state.ts                  # Game state types
+│   ├── rank.ts                   # Hand rank definitions
+│   └── types.d.ts                # Type declarations
 │
-├─ opponent_model.py      # Bayesian range updating
-├─ ev_calculator.py       # Monte‑Carlo EV computation
-├─ spr_utils.py           # SPR calculation & bet‑sizing heuristics
-├─ explainer.py           # Human‑readable report generation
-├─ main.py                # Demo script tying everything together
-└─ README.md              # This file
+├── poker_assistant/              # Python Poker Assistant Library
+│   ├── opponent_model.py         # Bayesian opponent range modeling
+│   ├── ev_calculator.py          # Monte Carlo EV calculator
+│   ├── spr_utils.py              # SPR & bet sizing utilities
+│   ├── explainer.py              # Human-readable explanations
+│   ├── preflop.py                # Preflop hand ranking & recommendations
+│   └── main.py                   # Demo script
+│
+├── public/                       # Extension manifest & assets
+└── package.json                  # Build config (webpack)
 ```
 
 ---
 
-## Core Concepts
+## Part 1: TypeScript Bot (Chrome Extension)
 
-### 1. Opponent Ranging
-We maintain a weight for each of the 1,326 possible hole‑card combos.  
-After each observed opponent action we update the weights via Bayes’ rule:
+### Architecture Overview
 
-\[
-w'_i = w_i \times P(\text{action}\mid \text{combo}_i, \text{context})
-\]
+The TypeScript bot runs as a content script injected into PokerNow pages. It:
+1. **Scrapes game state** from the DOM (`ui.ts`)
+2. **Runs a bot loop** every 500ms when it's our turn (`main.ts`)
+3. **Uses a two-tier decision system**:
+   - **Tier 1 (Preflop)**: Auto-fold based on user-configured hand grid
+   - **Tier 2 (Postflop)**: Rule-based if-then-else logic by hand rank
 
-The likelihood model (`_action_likelihood`) is a simple heuristic:
-* **Pre‑flop:** stronger hands raise/call, weaker hands fold.
-* **Post‑flop:** strong hands bet/raise, medium hands call, weak hands fold.
+### Decision Flow (`src/ai/ai.ts`)
 
-From the weighted distribution we can derive:
-* VPIP, PFR, 3‑bet, fold‑to‑cbet frequencies.
-* The most likely hole‑card combos (top‑N range).
-
-### 2. Expected Value (EV) Calculation
-For each candidate action (fold, call, raise of size *s*) we run a Monte‑Carlo simulation:
-
-1. Sample an opponent hole‑card from the current weighted range.  
-2. Deal the remaining board cards (turn/river) randomly.  
-3. Determine showdown outcome (win/tie/loss) using either the `deuces` library (if installed) or a heuristic hand‑strength fallback.  
-4. Compute the payoff for the action (including any additional bet/chips won or lost).  
-5. Average the payoff over all simulations → EV of the action.
-
-The action with the highest EV is recommended.
-
-### 3. SPR & Bet‑Sizing
-**SPR** = Effective Stack / Pot Size (measured on the flop).  
-
-| SPR Range | Strategic Meaning |
-|-----------|-------------------|
-| **< 4**   | Pot already large → commitment‑driven play; favor strong made hands; bluffs less effective. |
-| **4‑10**  | Balanced play; both immediate and future money matter. |
-| **> 10**  | Deep stacks → implied odds and position dominate; speculative hands gain value; more bluffing/floating. |
-
-`bet_size_recommendation()` returns suggested bet sizes as a fraction of the pot for value bets and bluffs, adjusted by SPR, hand strength, board texture, and position.
-
-### 4. Explanations
-The `explainer` module converts raw numbers into a readable report:
-* Opponent range (top combos and percentages).  
-* Tendency statistics (VPIP, PFR, etc.).  
-* SPR interpretation.  
-* EV comparison for each action.  
-* Final recommendation with notes (e.g., “Equity exceeds pot odds → profitable call”).
-
----
-
-## How to Use
-
-1. **Install optional dependency** (for accurate hand rankings):
-   ```bash
-   pip install deuces
-   ```
-   If not installed, the module falls back to a heuristic strength estimator.
-
-2. **Import the modules** in your own code:
-   ```python
-   from opponent_model import OpponentModel
-   from ev_calculator import EVCalculator
-   from spr_utils import calculate_spr, bet_size_recommendation
-   from explainer import generate_full_report
-   ```
-
-3. **Typical workflow**:
-   ```python
-   opp = OpponentModel("Villain")
-   # Update opponent model with observed actions as the hand progresses
-   opp.update_with_action(action, street, context)
-
-   # Compute SPR
-   spr = calculate_spr(effective_stack, pot)
-
-   # Estimate EV for each action
-   calc = EVCalculator(opp, num_simulations=2000)
-   evs = calc.compute_action_evs(our_hand, board, pot, bet_to_call,
-                                 raise_sizes=[0.5*pot, pot, 2*pot])
-
-   best_action = max(evs, key=evs.get)
-
-   # Generate a human‑readable report
-   report = generate_full_report(
-       model=opp,
-       board=board,
-       pot=pot,
-       effective_stack=effective_stack,
-       action_evs=evs,
-       best_action=best_action,
-       our_hand=our_hand
-   )
-   print(report)
-   ```
-
----
-
-## Example Walkthrough
-Running `python poker_assistant/main.py` produces output similar to:
-
-```
-=== Poker Assistant Demo ===
-
-Opponent tendencies after observations:
-  VPIP: 0.33
-  PFR:  0.33
-  3bet: 0.33
-  Fold to cbet: 0.00
-
-SPR: 3.33 (low)
-Suggested bet sizing: value 75% pot, bluff 0% pot
-
-Expected Values:
-    fold:  +0.000
-    call:  +0.212
-  raise_6: +0.348
- raise_12: +0.312
- raise_24: +0.254
-
-Best action: raise_6 (EV +0.348)
-
-=== FULL REPORT ===
-Hero hand: As Kh
-Board: Qd Jh 8c
-
-Stack-to-Pot Ratio (SPR): 3.33
-  Effective stack: 40.00  Pot: 12.00
-  SPR category: low
-  Implication: Pot is large relative to stacks; play is commitment-oriented.
-  Focus on strong made hands; draws have less implied value.
-
-Opponent tendencies:
-  VPIP: 33.33%
-  PFR:  33.33%
-  3bet: 33.33%
-  Fold to cbet: 0.00%
-
-Opponent range estimate (top 5):
-  AsKh    20.00%
-  QdQh    20.00%
-  7c5c    20.00%
-  AsQd    20.00%
-  KhQd    20.00%
-  Top 5 combos represent 100.0% of weighted range.
-
-Expected Value (in pot units):
-    fold:  +0.000 pot units (+0.00 bb)
-    call:  +0.212 pot units (+2.54 bb)
-  raise_6: +0.348 pot units (+4.18 bb) <-- BEST
- raise_12: +0.318 pot units (+3.82 bb)
- raise_24: +0.284 pot units (+3.41 bb)
-
-Recommended action: RAISE_6
-  Expected value: +0.348 pot units
-  Equity vs opponent range: 50.0%
-  Pot odds required: 25.0%
-  Equity exceeds pot odds → profitable call.
-  SPR: 3.33
-  Notes:
-    - You have above-average equity vs opponent range.
-    - Low SPR reduces bluff effectiveness; prioritize value hands.
-============================
+```typescript
+getAction(state: State): Action
+  └── 1. Auto-fold check (autoFoldLogic.ts)
+  └── 2. If postflop: log hand strength diagnostics
+  └── 3. Delegate to ifThenElseAi.ts
 ```
 
-The demo shows how the assistant:
+---
 
-* Updates its view of the opponent after observing a fold, a call, and a 3‑bet.  
-* Computes a low SPR (3.33) → recommends a value‑oriented bet size.  
-* Estimates EV for folding, calling, and several raise sizes; raising ½ pot yields the highest EV.  
-* Produces a full textual justification that references equity, pot odds, SPR, and opponent tendencies.
+### Tier 1: Preflop Auto-Fold (`src/ai/autoFoldLogic.ts`)
+
+**Core Concept**: 169 canonical preflop hands (13 pairs + 78 suited + 78 offsuit). User configures a "fold set" (red cells in popup grid). Any hand in the fold set → auto-fold preflop. Hands NOT in fold set → beep notification (user makes manual decision).
+
+**Key Functions**:
+| Function | Purpose |
+|----------|---------|
+| `shouldAutoFold(hand: Card[])` | Returns true if hand in fold set |
+| `calculateFoldAction(state)` | Returns `{type: "check_or_fold"}` if auto-fold, else `null` |
+| `playBeepForHand(state)` | Beeps once per new hand NOT in fold set |
+| `setFoldSet(keys)` / `getFoldSet()` | Persist to `chrome.storage.local` |
+| `setBeepEnabled(bool)` | Toggle beep notifications |
+
+**Hand Encoding** (`src/ai/preflopHand.ts`):
+- 13 pairs: `AA`, `KK`, ..., `22`
+- 78 suited: `AKs`, `AQs`, ..., `32s`
+- 78 offsuit: `AKo`, `AQo`, ..., `32o`
+- Total: 169 canonical hands
+
+**Default Behavior**: Complement of `DEFAULT_PLAYABLE_HANDS` (tight default range)
 
 ---
 
-## Extending the Assistant
+### Tier 2: Postflop If-Then-Else Engine (`src/ai/ifThenElse/ifThenElseAi.ts`)
 
-* **Improved likelihood model** – replace the heuristic `_action_likelihood` with a learned model (e.g., logistic regression or a small neural net) trained on hand histories.  
-* **Hand‑ranking accuracy** – ensure `deuces` is installed for exact showdown equity; you can also integrate external equity calculators (e.g., PokerStove, pypykothree) for speed via lookup tables.  
-* **Dynamic bet sizing** – instead of discrete raise sizes, solve a small optimization (e.g., gradient‑free search) to maximize EV over bet size.  
-* **Multi‑street planning** – extend the Monte‑Carlo rollout to simulate future betting streets using a simple policy (e.g., “bet pot with top‑pair+, check‑fold otherwise”) or a learned policy network.  
-* **Integration with a poker bot** – plug the `get_recommendation()` function into your bot’s decision loop, using the generated explanation for logging or debugging.
+Routes to hand-specific logic based on `state.handRank`:
+
+```
+if preflop          → preflopAction()
+else if hand ≥ FH   → bestHandAction()  (value bet/raise)
+else
+  switch(handRank):
+    HighCard    → highCardAction()
+    Pair        → pairAction()
+    TwoPair     → twoPairAction()
+    Trips/Set   → threeAction()
+    Straight    → straightAction()
+    Flush       → flushAction()
+    default     → bluffHandAction()
+```
+
+---
+
+### Probabilistic Action System (`src/ai/probabilisticAction.ts`)
+
+All action modules use **probabilistic action selection** for unpredictability:
+
+```typescript
+probabilisticAction(name, state, {
+  checkFoldProbability: 0.3,
+  callProbability: 0.4,
+  minRaiseProbability: 0.1,
+  halfPotRaiseProbability: 0.1,
+  potRaiseProbability: 0.05,
+  allInProbability: 0.05
+})
+```
+
+**Action Types**:
+| Key | Action | Amount |
+|-----|--------|--------|
+| `checkFoldProbability` | `check_or_fold` | - |
+| `callProbability` | `call` | - |
+| `minRaiseProbability` | `raise` | `"min"` |
+| `halfPotRaiseProbability` | `raise` | `"1/2_pot"` |
+| `potRaiseProbability` | `raise` | `"pot"` |
+| `allInProbability` | `raise` | `"all_in"` |
+
+Probabilities are normalized to sum to 1. Action chosen by random roll.
+
+**Helpers**:
+- `toCallDependent(state, {zero, nonZero})` - Different probs when facing bet vs checking
+- `checkCallBased({checkFoldProbability, callProbability, ...raiseShares})` - Auto-distributes remainder to raises
+- `zeroFill(args)` / `uniformFill(args)` - Fill undefined probabilities
+
+---
+
+### Hand Evaluation Utilities (`src/ai/aiUtils.ts`)
+
+| Function | Purpose |
+|----------|---------|
+| `isOneCardFlushPossible(handPlusBoard)` | Flush draw detection (1 card suit) |
+| `isOpenEndedStraightPresent(cards)` | Open-ended straight draw on board |
+| `isOneCardStraightPossible(board)` | Gutshot straight draw detection |
+| `findBestGapStraight(board)` | Best possible straight on board |
+| `getPairs(cards)` | Pair detection |
+
+---
+
+### Logger (`src/logger.ts`)
+
+**Class**: `Logger` (singleton via `logger.ts` export)
+
+**Features**:
+- Logs game state snapshots: timestamp, action, hand, board, pot
+- `log(action, state)` - Called on each decision
+- `getLogs()` - Retrieve all entries
+- `clear()` - Reset log
+- `download(filename?)` - **Downloads JSON log via `chrome.downloads.download()`** (requires `"downloads"` permission in manifest)
+
+**LogEntry Structure**:
+```typescript
+interface LogEntry {
+  timestamp: number;
+  action: {type: string; amount?: number} | null;
+  hand: Card[];      // Hole cards
+  board: Card[];     // Community cards
+  pot?: number;
+}
+```
+
+**Usage in bot loop** (`main.ts`):
+```typescript
+import { Logger } from "./logger";
+const logger = new Logger();
+
+// ... after sanitizeAction()
+logger.log(sanitizedAction, state);
+```
+
+**Manifest Requirement** (`public/manifest.json`):
+```json
+{
+  "permissions": ["storage", "downloads", "activeTab", "scripting"]
+}
+```
+
+---
+
+### Popup UI (`src/pages/popup.ts` + `handGrid.ts`)
+
+- 169-cell grid (13×13) showing all preflop hands
+- **Red** = auto-fold, **Green** = play (beep)
+- Click to toggle hands in fold set
+- Persists to `chrome.storage.local`
+- Debug panel shows fold count, last folded hand, last beeped hand
+
+---
+
+## Part 2: Python Poker Assistant Library (`poker_assistant/`)
+
+A research-oriented library for opponent modeling, EV calculation, SPR analysis, and explainable recommendations.
+
+### 1. Opponent Modeling (`opponent_model.py`)
+
+**Bayesian Range Updating**: Maintains weight for each of 1,326 hole card combos. Updates via Bayes' rule after each observed action:
+
+```
+weight_i ← weight_i × P(action | combo_i, context)
+```
+
+**Key Features**:
+- `OpponentModel(name)` - Initialize with uniform prior
+- `update_with_action(action, street, context)` - Bayesian update
+- `get_range()` - Returns normalized `(combo, probability)` list sorted desc
+- Heuristic hand strength (`_combo_strength`) based on rank, suitedness, connectivity
+- Simple likelihood model: stronger hands more likely to bet/raise, weaker to fold
+- Tracks VPIP, PFR, 3-bet%, fold-to-cbet%
+
+**Usage**:
+```python
+opp = OpponentModel("Villain")
+opp.update_with_action('call', 'flop', {'facing_cbet': True})
+opp.update_with_action('raise', 'preflop', {'is_3bet': True})
+print(f"VPIP: {opp.get_vpip():.2f}")
+dist = opp.get_range()  # [(('As','Kh'), 0.004), ...]
+```
+
+---
+
+### 2. EV Calculator (`ev_calculator.py`)
+
+**Monte Carlo Simulation** for action EV estimation:
+
+```python
+calc = EVCalculator(opponent_model, num_simulations=2000)
+evs = calc.compute_action_evs(
+    our_hand=['As', 'Ad'],
+    board=['Ah', 'Kd', '9c'],
+    pot=6.0,
+    bet_to_call=2.0,
+    raise_sizes=[2.0, 4.0]  # pot/2, pot
+)
+# Returns: {'fold': 0.0, 'call': 1.5, 'raise_2': 3.2, 'raise_4': 2.8}
+```
+
+**Model**:
+1. Sample opponent hand from weighted range
+2. Deal remaining board cards (turn/river)
+3. Determine showdown outcome (uses `deuces` if installed, else heuristic)
+4. Compute payoff for fold/call/raise
+5. Average over N simulations
+
+**Supports**: `deuces` for exact hand evaluation (pip install deuces)
+
+---
+
+### 3. SPR & Bet Sizing (`spr_utils.py`)
+
+**SPR Calculation**:
+```python
+spr = calculate_spr(effective_stack=40.0, pot_size=12.0)  # 3.33
+```
+
+**SPR Categories**:
+| SPR | Category | Strategy |
+|-----|----------|----------|
+| < 4 | Low | Commitment-driven, value-heavy, bluff less |
+| 4-10 | Medium | Balanced, both value & bluff viable |
+| > 10 | High | Implied odds, speculative hands, more bluffs |
+
+**Bet Sizing Recommendation**:
+```python
+rec = bet_size_recommendation(
+    spr=3.33,
+    hand_strength=0.75,
+    board_texture="medium",
+    position="IP"
+)
+# {'value_bet': 0.5, 'bluff_bet': 0.0, 'SPR': 3.33, 'category': 'low'}
+```
+
+Adjusts for: SPR, hand strength, board texture (dry/medium/wet), position (IP/OOP)
+
+---
+
+### 4. Explanations (`explainer.py`)
+
+Generates human-readable reports combining all factors:
+
+```python
+report = generate_full_report(
+    model=opp,
+    board=['Qd', 'Jh', '8c'],
+    pot=12.0,
+    effective_stack=40.0,
+    action_evs=evs,
+    best_action='raise_6',
+    our_hand=['As', 'Kh']
+)
+```
+
+**Report Sections**:
+1. Hero hand & board
+2. SPR with strategic implication
+3. Opponent tendencies (VPIP, PFR, 3-bet, fold-to-cbet)
+4. Top-N weighted opponent combos
+5. EV table (fold, call, raise sizes) with BEST highlighted
+6. Recommendation with equity, pot odds, SPR notes
+
+---
+
+### 5. Preflop (`preflop.py`)
+
+**Simplified Sklansky-Malmuth Tier (0-5)**:
+- Tier 5: AA, KK, QQ, AKs, AKo
+- Tier 4: JJ, TT, AQs, AJs, KQs
+- Tier 3: 99-77, ATs-A9s, KTs+, QJs, JTs, suited connectors
+- Tier 2: AJo+, KQo, 66-55, broadway offsuit
+- Tier 1: 44-22, any Ax suited, Kxs, Qxs
+- Tier 0: Trash
+
+**Adjustments**:
+- Position factor: UTG=0.6, MP=0.8, CO/BU=1.0, SB/BB=0.9 (×1.1 for 6-max, ×0.9 for 9-max)
+- Stack factor: ≥40bb=1.2, 20-40bb=1.0, 10-20bb=0.8, <10bb=0.5 (push/fold)
+
+**Thresholds** (divided by combined factor):
+- Raise: base tier 3 / factor
+- Call: base tier 1 / factor
+
+```python
+decision = preflop_recommendation(
+    hand=['As', 'Kh'],
+    position='BU',
+    num_players=6,
+    effective_stack=40.0,
+    pot=1.5,
+    bet_to_call=1.0
+)
+print(explain_preflop(decision))
+# RAISE 3.0 (Tier 4, pos=1.0, stack=1.2, req_raise=2.5, req_call=0.83)
+```
+
+---
+
+### Demo (`poker_assistant/main.py`)
+
+```bash
+cd poker_assistant
+python main.py
+```
+
+Shows both preflop and postflop scenarios with full explanation report.
+
+---
+
+## Installation & Usage
+
+### Chrome Extension
+```bash
+npm install
+npm run build
+# Load `dist/` folder as unpacked extension in Chrome
+# Navigate to pokernow.club, open popup, configure fold grid, click "Start Bot"
+```
+
+### Python Assistant
+```bash
+pip install deuces  # optional, for exact equity
+cd poker_assistant
+python main.py
+```
 
 ---
 
 ## References & Further Reading
 
-* **Counterfactual Regret Minimization (CFR)** – the foundation of modern poker AI (e.g., Libratus, Pluribus).  
-  * https://papers.nips.cc/paper/2015/hash/5284139550e8ceb3b5b2e5d6ee104a2f-Abstract.html  
-* **Theory of Poker** – David Sklansky (chapters on optimal play, bluffing, and pot odds).  
-* **Modern Poker Theory** – Michael Acevedo (covers GTO concepts and exploitative adjustments).  
-* **Anaconda Poker** – open‑source poker simulation framework (useful for generating training data).  
-* **DeepMind’s OpenSpiel** – includes Leduc Hold’em and Leduc‑style RL environments.  
-* **GitHub – deuces** – pure‑Python poker hand evaluation library (used optionally).  
+- **Counterfactual Regret Minimization (CFR)** - Foundation of modern poker AI (Libratus, Pluribus)
+- **The Theory of Poker** - David Sklansky (optimal play, bluffing, pot odds)
+- **Modern Poker Theory** - Michael Acevedo (GTO concepts, exploitative adjustments)
+- **deuces** - Pure-Python hand evaluation library
+- **OpenSpiel** - DeepMind's framework including Leduc Hold'em environments
 
 ---
 
-### Final Note
-This implementation is intended for **study and analysis** only. Using real‑time assistance in online poker may violate the terms of service of many platforms. Always play responsibly and within the rules of the site you are on.
-
-Enjoy building smarter poker strategies! 🎴
+Enjoy building smarter, data-driven poker strategies! ♠️♥️♣️♦️

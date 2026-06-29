@@ -2,6 +2,7 @@ import { getAction } from "./ai/ai";
 import { getBigBlindValue, getState, isMyTurn, showHandIfPossible } from "./ui";
 import { performAction, sanitizeAction, onAction } from "./action";
 import { showDebugPanel } from "./debug";
+import { Logger } from "./logger";
 import {
     setFoldSet,
     shouldAutoFold,
@@ -15,6 +16,8 @@ import { encodeHand } from "./ai/preflopHand";
 const timeoutMs = 500;
 const STORAGE_FOLD_KEY = "pokerbot.autofoldHands";
 const STORAGE_BEEP_KEY = "pokerbot.beepEnabled";
+
+const logger = new Logger();
 
 let botLoopTimeout: NodeJS.Timer | undefined;
 let lastBeepKey: string | null = null;
@@ -112,6 +115,9 @@ function startBotLoop() {
 
             const sanitizedAction = sanitizeAction(action, state);
             console.log("sanitized bot action:", sanitizedAction);
+
+            // Log the action and state
+            logger.log(sanitizedAction, state);
 
             performAction(sanitizedAction, () => setTimeout(botLoop, timeoutMs));
         }

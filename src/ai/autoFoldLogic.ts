@@ -169,6 +169,6 @@ export function playBeepForHand(state: State): string | null {
     if (shouldAutoFold(state.hand))
         return null; // red cell → bot will fold; stay silent
 
-    playBeep();
+    // playBeep(); // Beep removed as requested
     return handKey;
 }

@@ -21,7 +21,8 @@
       "Bash(python main.py)",
       "Read(//c/RCT/Desktop/**)",
       "Bash(python poker_assistant/main.py)",
-      "Bash(python -m py_compile poker_assistant/*.py)"
+      "Bash(python -m py_compile poker_assistant/*.py)",
+      "Bash(npm run *)"
     ]
   }
 }
