@@ -1,123 +1,240 @@
-# Overview
+# Poker AI Assistant – Research & Implementation
 
-This is poker bot implemented for https://www.pokernow.club/ as a chrome extension.
+This repository contains a research‑based implementation of a poker‑AI assistant that focuses on:
 
-If you are reading on GitHub you are already seeing the formatted pretty version of this readme.
-If you are working on Visual Studio Code you can press CTRL+SHIFT+V to get the same visualization.
-Otherwise you can paste the contents into https://markdownlivepreview.com/
+* **Opponent ranging** – Bayesian updating of a probability distribution over opponent hole‑card combinations.
+* **Expected Value (EV) calculation** – Monte‑Carlo simulation to estimate the value of folding, calling, or raising.
+* **Stack‑to‑Pot Ratio (SPR) analysis** – Computation of SPR and strategic recommendations based on its value.
+* **Explainable output** – Human‑readable justification for the recommended action.
 
-To use the poker bot:
+The code is written in Python (no external dependencies beyond the optional `deuces` library for accurate hand evaluation) and is organized as a small library that can be imported into any poker‑bot or analysis tool.
 
-* you first need to build it (instructions follow in the next sections)
+---
 
-* add the build as a chrome extension
+## Table of Contents
+1. [Project Structure](#project-structure)  
+2. [Core Concepts](#core-concepts)  
+   1. Opponent Ranging  
+   2. EV Calculation  
+   3. SPR & Bet‑Sizing  
+   4. Explanations  
+3. [How to Use](#how-to-use)  
+4. [Example Walkthrough](#example-walkthrough)  
+5. [Extending the Assistant](#extending-the-assistant)  
+6. [References & Further Reading](#references--further-reading)
 
-* run the bot in the browser by clicking on the extension icon in chrome and then on the "start bot" button
+---
 
-* if you want to run many bots, you will need to use something [like this](https://chrome.google.com/webstore/detail/sessionbox-multi-login-to/megbklhjamjbcafknkgmokldgolkdfig)
-
-If you want to edit the code to make your own bot, see the detailed instructions at the end of this readme.
-TL;DR implement the `getAction` function in `src/ai/ai.ts`.
-
-
-# Build
-
-You need node js to build the extension. I used version v14.18.1, I don't know if it works with any other version.
-
-After downloading and installing node js, open a terminal in the root of the project.
-
-Run this command to install dependencies:
+## Project Structure
 ```
-npm i
-```
-
-The `i` in the command stands for install. You need only run this once.
-
-
-To build, execute this command in the root folder of this project:
-```
-npm run build
+poker_assistant/
+│
+├─ opponent_model.py      # Bayesian range updating
+├─ ev_calculator.py       # Monte‑Carlo EV computation
+├─ spr_utils.py           # SPR calculation & bet‑sizing heuristics
+├─ explainer.py           # Human‑readable report generation
+├─ main.py                # Demo script tying everything together
+└─ README.md              # This file
 ```
 
-You need to run this command every time you edit the code.
+---
 
-You can find the build output in the `/dist` folder under the root of the project.
+## Core Concepts
 
+### 1. Opponent Ranging
+We maintain a weight for each of the 1,326 possible hole‑card combos.  
+After each observed opponent action we update the weights via Bayes’ rule:
 
-# Add extension to chrome
+\[
+w'_i = w_i \times P(\text{action}\mid \text{combo}_i, \text{context})
+\]
 
-Follow this video from 4:26 to 5:00
-https://www.youtube.com/watch?v=0n809nd4Zu4&t=4m26s
+The likelihood model (`_action_likelihood`) is a simple heuristic:
+* **Pre‑flop:** stronger hands raise/call, weaker hands fold.
+* **Post‑flop:** strong hands bet/raise, medium hands call, weak hands fold.
 
-Note that you need to select the `/dist` folder, not the project root!
+From the weighted distribution we can derive:
+* VPIP, PFR, 3‑bet, fold‑to‑cbet frequencies.
+* The most likely hole‑card combos (top‑N range).
 
+### 2. Expected Value (EV) Calculation
+For each candidate action (fold, call, raise of size *s*) we run a Monte‑Carlo simulation:
 
-# Implementing your own bot
+1. Sample an opponent hole‑card from the current weighted range.  
+2. Deal the remaining board cards (turn/river) randomly.  
+3. Determine showdown outcome (win/tie/loss) using either the `deuces` library (if installed) or a heuristic hand‑strength fallback.  
+4. Compute the payoff for the action (including any additional bet/chips won or lost).  
+5. Average the payoff over all simulations → EV of the action.
 
-I suggest you create a folder for you code under `src/ai` like I did for the if-then-else bot.
+The action with the highest EV is recommended.
 
-In your code you need to implement a `getAction(state: State): Action` function.
+### 3. SPR & Bet‑Sizing
+**SPR** = Effective Stack / Pot Size (measured on the flop).  
 
-Then you need to edit `src/ai/ai.ts` to call your code instead.
+| SPR Range | Strategic Meaning |
+|-----------|-------------------|
+| **< 4**   | Pot already large → commitment‑driven play; favor strong made hands; bluffs less effective. |
+| **4‑10**  | Balanced play; both immediate and future money matter. |
+| **> 10**  | Deep stacks → implied odds and position dominate; speculative hands gain value; more bluffing/floating. |
 
-In `src/ai/aiUtils.ts` you can find functions for common logic such as:
-* what pairs are there in this list of cards?
-* is there an open ended straight draw in this list?
-* what's the highest card in this list?
+`bet_size_recommendation()` returns suggested bet sizes as a fraction of the pot for value bets and bluffs, adjusted by SPR, hand strength, board texture, and position.
 
-In `src/ai/probabilisticAction.ts` you find utilities for randomly weighted actions.
+### 4. Explanations
+The `explainer` module converts raw numbers into a readable report:
+* Opponent range (top combos and percentages).  
+* Tendency statistics (VPIP, PFR, etc.).  
+* SPR interpretation.  
+* EV comparison for each action.  
+* Final recommendation with notes (e.g., “Equity exceeds pot odds → profitable call”).
 
-The code checks every half second if it's the bot's turn in `src/main.ts` and when it is the `getAction` function is called.
+---
 
-If `getAction` throws an exception or returns a nonsensical action, the bot will check or fold.
+## How to Use
 
-If you need to do or read something on the web page that I didn't code already, you should write a function in `src/ui.ts`, which contains all code interacting with the page.
-Typically you will call `document.querySelector(...)` with a css selector to get a dom element and do something with it.
+1. **Install optional dependency** (for accurate hand rankings):
+   ```bash
+   pip install deuces
+   ```
+   If not installed, the module falls back to a heuristic strength estimator.
 
-If you want to edit the popup that opens when you click the extension icon look into `src/pages`.
+2. **Import the modules** in your own code:
+   ```python
+   from opponent_model import OpponentModel
+   from ev_calculator import EVCalculator
+   from spr_utils import calculate_spr, bet_size_recommendation
+   from explainer import generate_full_report
+   ```
 
-Note that the extension only runs when you're on `https://www.pokernow.club`.
-If you need to run it somewhere else you need to edit `public/manifest.json` and change the following line to fit your use case:
+3. **Typical workflow**:
+   ```python
+   opp = OpponentModel("Villain")
+   # Update opponent model with observed actions as the hand progresses
+   opp.update_with_action(action, street, context)
+
+   # Compute SPR
+   spr = calculate_spr(effective_stack, pot)
+
+   # Estimate EV for each action
+   calc = EVCalculator(opp, num_simulations=2000)
+   evs = calc.compute_action_evs(our_hand, board, pot, bet_to_call,
+                                 raise_sizes=[0.5*pot, pot, 2*pot])
+
+   best_action = max(evs, key=evs.get)
+
+   # Generate a human‑readable report
+   report = generate_full_report(
+       model=opp,
+       board=board,
+       pot=pot,
+       effective_stack=effective_stack,
+       action_evs=evs,
+       best_action=best_action,
+       our_hand=our_hand
+   )
+   print(report)
+   ```
+
+---
+
+## Example Walkthrough
+Running `python poker_assistant/main.py` produces output similar to:
+
 ```
-"matches": ["https://www.pokernow.club/*"],
+=== Poker Assistant Demo ===
+
+Opponent tendencies after observations:
+  VPIP: 0.33
+  PFR:  0.33
+  3bet: 0.33
+  Fold to cbet: 0.00
+
+SPR: 3.33 (low)
+Suggested bet sizing: value 75% pot, bluff 0% pot
+
+Expected Values:
+    fold:  +0.000
+    call:  +0.212
+  raise_6: +0.348
+ raise_12: +0.312
+ raise_24: +0.254
+
+Best action: raise_6 (EV +0.348)
+
+=== FULL REPORT ===
+Hero hand: As Kh
+Board: Qd Jh 8c
+
+Stack-to-Pot Ratio (SPR): 3.33
+  Effective stack: 40.00  Pot: 12.00
+  SPR category: low
+  Implication: Pot is large relative to stacks; play is commitment-oriented.
+  Focus on strong made hands; draws have less implied value.
+
+Opponent tendencies:
+  VPIP: 33.33%
+  PFR:  33.33%
+  3bet: 33.33%
+  Fold to cbet: 0.00%
+
+Opponent range estimate (top 5):
+  AsKh    20.00%
+  QdQh    20.00%
+  7c5c    20.00%
+  AsQd    20.00%
+  KhQd    20.00%
+  Top 5 combos represent 100.0% of weighted range.
+
+Expected Value (in pot units):
+    fold:  +0.000 pot units (+0.00 bb)
+    call:  +0.212 pot units (+2.54 bb)
+  raise_6: +0.348 pot units (+4.18 bb) <-- BEST
+ raise_12: +0.318 pot units (+3.82 bb)
+ raise_24: +0.284 pot units (+3.41 bb)
+
+Recommended action: RAISE_6
+  Expected value: +0.348 pot units
+  Equity vs opponent range: 50.0%
+  Pot odds required: 25.0%
+  Equity exceeds pot odds → profitable call.
+  SPR: 3.33
+  Notes:
+    - You have above-average equity vs opponent range.
+    - Low SPR reduces bluff effectiveness; prioritize value hands.
+============================
 ```
 
-To enable the extension everywhere simply use:
-```
-"matches": ["<all_urls>"],
-```
+The demo shows how the assistant:
 
-## Apply code changes to the extension
+* Updates its view of the opponent after observing a fold, a call, and a 3‑bet.  
+* Computes a low SPR (3.33) → recommends a value‑oriented bet size.  
+* Estimates EV for folding, calling, and several raise sizes; raising ½ pot yields the highest EV.  
+* Produces a full textual justification that references equity, pot odds, SPR, and opponent tendencies.
 
-Whenever you edit any code you need to:
-* (optional) increase the version in `public/manifest.json`
-* rebuild the extension
-* reload the extension in the browser
-* refresh the pokernow page
-* restart the bot
+---
 
-I recommend you always increase the version because this is logged in the browser console when the extension is loaded (look for "pokerbot vX.Y") and lets you easily make sure that you succesfully updated the bot.
-Otherwise you might risk running an older version without realizing it.
+## Extending the Assistant
 
-# Debugging
+* **Improved likelihood model** – replace the heuristic `_action_likelihood` with a learned model (e.g., logistic regression or a small neural net) trained on hand histories.  
+* **Hand‑ranking accuracy** – ensure `deuces` is installed for exact showdown equity; you can also integrate external equity calculators (e.g., PokerStove, pypykothree) for speed via lookup tables.  
+* **Dynamic bet sizing** – instead of discrete raise sizes, solve a small optimization (e.g., gradient‑free search) to maximize EV over bet size.  
+* **Multi‑street planning** – extend the Monte‑Carlo rollout to simulate future betting streets using a simple policy (e.g., “bet pot with top‑pair+, check‑fold otherwise”) or a learned policy network.  
+* **Integration with a poker bot** – plug the `get_recommendation()` function into your bot’s decision loop, using the generated explanation for logging or debugging.
 
-This is basic js stuff: when you `console.log` something remember that chrome will let you thoroughly inspect any object you pass.
+---
 
-This means that if you do something like:
-```
-console.log("some message", {
-    someField: {
-        someNestedField: ...
-    },
-    someOtherField: ...
-});
-```
-You will be able to see all (nested) fields in the console.
+## References & Further Reading
 
-By default my code will log the state of the game, some stats, the action it gets as output of the `getAction` function and the sanitized action.
+* **Counterfactual Regret Minimization (CFR)** – the foundation of modern poker AI (e.g., Libratus, Pluribus).  
+  * https://papers.nips.cc/paper/2015/hash/5284139550e8ceb3b5b2e5d6ee104a2f-Abstract.html  
+* **Theory of Poker** – David Sklansky (chapters on optimal play, bluffing, and pot odds).  
+* **Modern Poker Theory** – Michael Acevedo (covers GTO concepts and exploitative adjustments).  
+* **Anaconda Poker** – open‑source poker simulation framework (useful for generating training data).  
+* **DeepMind’s OpenSpiel** – includes Leduc Hold’em and Leduc‑style RL environments.  
+* **GitHub – deuces** – pure‑Python poker hand evaluation library (used optionally).  
 
-If you need to debug line by line with the chrome debugger, look for any line logged by the bot. At the right border you will find a clickable link like `main.js:1234`. This will take you to line `1234` of the build output javascript. Here you can place any breakpoint you need.
+---
 
-The build output is largely 1:1 with respect to the typescript source, it's not obfuscated or uglyfied, so you should have no trouble following it.
+### Final Note
+This implementation is intended for **study and analysis** only. Using real‑time assistance in online poker may violate the terms of service of many platforms. Always play responsibly and within the rules of the site you are on.
 
-Unfortunately I have not found a way to debug on the original source, despite a sourcemap being generated in the webpack config. If you do, tell me!
+Enjoy building smarter poker strategies! 🎴

@@ -4,7 +4,24 @@
       "Bash(npx tsc *)",
       "Bash(npx webpack *)",
       "Bash(node verify_autofold.js)",
-      "Bash(node verify_beep.js)"
+      "Bash(node verify_beep.js)",
+      "Skill(deep-research)",
+      "WebSearch",
+      "WebFetch(domain:www.upswingpoker.com)",
+      "WebFetch(domain:www.pokerstrategy.com)",
+      "WebFetch(domain:upswingpoker.com)",
+      "WebFetch(domain:redchippoker.com)",
+      "WebFetch(domain:www.thepokerbank.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.pokerstars.com)",
+      "WebFetch(domain:riverodds.app)",
+      "Read(//c/Users/rct/Desktop/PokerNowBot/**)",
+      "Bash(python -m poker_assistant.main)",
+      "Bash(python main.py)",
+      "Read(//c/RCT/Desktop/**)",
+      "Bash(python poker_assistant/main.py)",
+      "Bash(python -m py_compile poker_assistant/*.py)"
     ]
   }
 }
