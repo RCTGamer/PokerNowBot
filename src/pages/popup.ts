@@ -32,6 +32,40 @@ document.getElementById("debug-bot")?.addEventListener("click", () => {
     sendMessage("open_debug");
 });
 
+document.getElementById("download-logs")?.addEventListener("click", () => {
+    sendMessage("download_logs");
+});
+
+/**
+ * "Background window" — opens PokerNow in a small dedicated window so the bot
+ * keeps running even when the user switches tabs. Chrome aggressively throttles
+ * hidden tabs (clamps timers to >=1s and progressively freezes them); a normal
+ * window is not classified as a background tab and stays responsive. The user
+ * can minimize the window, but must keep it open.
+ *
+ * type: "normal" — small fixed size keeps it out of the way
+ * focused: false — doesn't steal focus from the user's current task
+ */
+document.getElementById("open-background")?.addEventListener("click", () => {
+    chrome.windows.create(
+        {
+            url: "https://www.pokernow.club",
+            type: "normal",
+            width: 480,
+            height: 720,
+            focused: false,
+        },
+        (win) => {
+            if (chrome.runtime.lastError) {
+                console.error("[pokerbot] background window failed:", chrome.runtime.lastError.message);
+            }
+            else if (win) {
+                console.log("[pokerbot] background window opened:", win.id);
+            }
+        },
+    );
+});
+
 setInterval(
     function uiLoop() {
         sendMessage("get_bot_status", (response: BotStatus) => {

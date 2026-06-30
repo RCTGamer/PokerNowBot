@@ -13,7 +13,7 @@ import {
 } from "./ai/autoFoldLogic";
 import { encodeHand } from "./ai/preflopHand";
 
-const timeoutMs = 500;
+let timeoutMs = 500;
 const STORAGE_FOLD_KEY = "pokerbot.autofoldHands";
 const STORAGE_BEEP_KEY = "pokerbot.beepEnabled";
 
@@ -21,6 +21,7 @@ const logger = new Logger();
 
 let botLoopTimeout: NodeJS.Timer | undefined;
 let lastBeepKey: string | null = null;
+let preflopIntervalId: number;
 
 // --- debug counters exposed to the popup -----------------------------------
 let foldCount = 0;
@@ -95,37 +96,56 @@ function startBotLoop() {
     console.log("big blind: " + getBigBlindValue());
     console.log("fold set size: " + getFoldSet().length);
 
+    /**
+     * Self-healing bot loop:
+     *  - Always reschedules the next tick in a finally-like style so any
+     *    error in state scraping / action selection / DOM clicks doesn't
+     *    silently kill the loop (this was the "stops after 3 hands" bug).
+     *  - Always stores the next setTimeout id in botLoopTimeout so
+     *    stopBotLoop can actually stop the loop, even when it is mid-turn.
+     *  - Reads timeoutMs at the moment of rescheduling so the
+     *    visibility-based interval change takes effect on the next tick.
+     */
     function botLoop() {
-        if (isMyTurn()) {
-            console.log("bot turn");
+        try {
+            if (isMyTurn()) {
+                console.log("bot turn");
 
-            const state = getState();
-            console.log("state: ", state);
+                const state = getState();
+                console.log("state: ", state);
 
-            let action: Action | undefined;
+                let action: Action | undefined;
 
-            try {
-                action = getAction(state);
-                console.log("bot action:", action);
+                try {
+                    action = getAction(state);
+                    console.log("bot action:", action);
+                }
+                catch (err) {
+                    action = undefined;
+                    console.error("bot action error:", err);
+                }
+
+                const sanitizedAction = sanitizeAction(action, state);
+                console.log("sanitized bot action:", sanitizedAction);
+
+                logger.log(sanitizedAction, state);
+
+                performAction(sanitizedAction, () => {
+                    botLoopTimeout = setTimeout(botLoop, timeoutMs);
+                });
             }
-            catch (err) {
-                action = undefined;
-                console.error("bot error:", err);
+            else {
+                botLoopTimeout = setTimeout(botLoop, timeoutMs);
             }
 
-            const sanitizedAction = sanitizeAction(action, state);
-            console.log("sanitized bot action:", sanitizedAction);
-
-            // Log the action and state
-            logger.log(sanitizedAction, state);
-
-            performAction(sanitizedAction, () => setTimeout(botLoop, timeoutMs));
+            showHandIfPossible();
         }
-        else {
+        catch (err) {
+            console.error("bot loop fatal:", err);
+            // Always reschedule so the loop survives crashes in getState,
+            // DOM access, or any single-tick error.
             botLoopTimeout = setTimeout(botLoop, timeoutMs);
         }
-
-        showHandIfPossible();
     }
 
     botLoop();
@@ -163,6 +183,9 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, callback) 
                 lastBeepKey,
             } satisfies BotDebug);
             break;
+        case "download_logs":
+            logger.download();
+            break;
     }
 });
 
@@ -177,7 +200,6 @@ loadSettings();
  *
  * Stops as soon as the user closes the bot / page / extension.
  */
-const watchIntervalMs = 500;
 function preflopWatcher() {
     try {
         const state = getState();
@@ -187,4 +209,34 @@ function preflopWatcher() {
         // ignore transient DOM errors
     }
 }
-setInterval(preflopWatcher, watchIntervalMs);
+// Update timeout intervals based on page visibility to prevent throttling in background tabs
+	function updateIntervalsBasedOnVisibility() {
+	    if (document.hidden) {
+	        // When tab is hidden, use longer intervals to avoid excessive throttling
+	        // Use 1000ms (1 second) to stay above Chrome's background tab throttling threshold
+	        timeoutMs = 1000;
+	    } else {
+	        // When tab is visible, use normal responsive interval
+	        timeoutMs = 500;
+	    }
+	}
+
+	// Set initial intervals based on current visibility
+	updateIntervalsBasedOnVisibility();
+
+	// Listen for visibility changes to adjust polling intervals
+	document.addEventListener('visibilitychange', updateIntervalsBasedOnVisibility);
+
+/**
+ * Recursive-setTimeout polling for the preflop watcher, instead of
+ * `setInterval`. Reason: setInterval captures its period at creation time,
+ * so mutating `timeoutMs` later (as we do on visibilitychange) does NOT
+ * change the cadence. Recursive setTimeout reads `timeoutMs` at the moment
+ * of rescheduling, so the visibility-based 500ms / 1000ms split actually
+ * applies.
+ */
+function preflopWatcherLoop() {
+    preflopWatcher();
+    setTimeout(preflopWatcherLoop, timeoutMs);
+}
+preflopWatcherLoop();

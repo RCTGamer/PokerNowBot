@@ -22,7 +22,8 @@
       "Read(//c/RCT/Desktop/**)",
       "Bash(python poker_assistant/main.py)",
       "Bash(python -m py_compile poker_assistant/*.py)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(awk NR==124 { for\\(i=1;i<=length\\($0\\);i++\\) printf \"%02x \", substr\\($0,i,1\\)+0; print \"\" } *)"
     ]
   }
 }

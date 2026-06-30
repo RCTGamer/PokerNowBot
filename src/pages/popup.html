@@ -10,7 +10,7 @@
         color: #e0e0e0;
       }
       h4 { margin: 0 0 8px 0; }
-      .row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+      .row { display: flex; gap: 6px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
       .row > * { flex: 0 0 auto; }
       .row .grow { flex: 1 1 auto; }
       button {
@@ -121,6 +121,8 @@
       <button id="start-bot">start bot</button>
       <button id="kill-bot">kill bot</button>
       <button id="debug-bot">debug</button>
+      <button id="download-logs" title="Trigger the next bot tick and save the in-memory log to your downloads folder.">download logs</button>
+      <button id="open-background" title="Open PokerNow in a small dedicated window so the bot keeps running even when you switch tabs. The window is intentionally visible from Chrome's perspective to avoid background-tab throttling; you can minimize it but keep it open.">background window</button>
     </div>
 
     <div class="pokerbot-section">

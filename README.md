@@ -47,23 +47,112 @@ PokerNowBot/
 
 ## Part 1: TypeScript Bot (Chrome Extension)
 
+### How It Works (end-to-end)
+
+```
+1. Content script loads on pokernow.club (matches pattern in manifest.json).
+2. main.ts loads the user's fold set + beep preference from chrome.storage.local,
+   starts the lightweight preflop watcher, and waits for popup messages.
+3. User opens the popup, configures their auto-fold grid, optionally clicks
+   "background window" to open PokerNow in a small always-visible window
+   (so the bot survives background-tab throttling).
+4. User clicks "start bot" → main.ts begins a 500ms-tick recursive bot loop.
+5. Each tick:
+     a. isMyTurn()       — checks PokerNow's .action-signal DOM node
+     b. getState()       — scrapes hand, board, pot, stack, etc. from DOM
+     c. getAction(state) — routes to auto-fold (Tier 1) or if-then-else (Tier 2)
+     d. sanitizeAction() — clamps undefined/invalid actions to safe defaults
+     e. logger.log()     — records action + state snapshot in memory
+     f. performAction()  — clicks PokerNow's check/fold/call/raise buttons
+     g. Self-re-schedules via setTimeout — even if any step throws, the loop
+        always reschedules the next tick (resilience, see below).
+6. Independently, the preflop watcher fires every ~500ms to beep when a hand
+   *outside* the user's fold set appears, even when the bot is stopped —
+   so the user hears "you should make a real decision now."
+7. The "download logs" button serializes the in-memory log entries to JSON
+   and saves to disk via chrome.downloads.
+```
+
+The whole bot exists as two tiers of decision logic layered over a DOM scraper and a DOM clicker:
+
+| Layer | What it does | Where |
+|---|---|---|
+| **DOM scrape** | Read the game state from PokerNow's HTML | `src/ui.ts` |
+| **DOM click** | Trigger PokerNow's check/fold/call/raise buttons | `src/action.ts`, `src/ui.ts` |
+| **Tier 1: auto-fold** | If preflop + hand is in red cell → fold immediately | `src/ai/autoFoldLogic.ts` |
+| **Tier 2: if-then-else** | Otherwise route by hand rank (Pair, Flush…) | `src/ai/ifThenElse/ifThenElseAi.ts` |
+| **Probabilistic action** | Mix of fold/call/raise chosen per-tick by random roll | `src/ai/probabilisticAction.ts` |
+| **Bot loop / resilience** | Self-healing 500ms tick, always reschedules | `src/main.ts` |
+| **Logger** | Records every action + state to in-memory list | `src/logger.ts` |
+| **Popup UI** | Red/green fold grid, start/kill/debug/download/bg window | `src/pages/popup.ts`, `src/pages/handGrid.ts` |
+
+---
+
 ### Architecture Overview
 
 The TypeScript bot runs as a content script injected into PokerNow pages. It:
 1. **Scrapes game state** from the DOM (`ui.ts`)
-2. **Runs a bot loop** every 500ms when it's our turn (`main.ts`)
+2. **Runs a bot loop** every 500ms when it's our turn (1000ms when tab is hidden to avoid throttling) (`main.ts`)
 3. **Uses a two-tier decision system**:
    - **Tier 1 (Preflop)**: Auto-fold based on user-configured hand grid
    - **Tier 2 (Postflop)**: Rule-based if-then-else logic by hand rank
 
-### Decision Flow (`src/ai/ai.ts`)
+### Bot Loop Flow (`src/main.ts`)
+
+The bot loop runs on an interval (adaptive based on tab visibility) and follows this flow:
 
 ```typescript
-getAction(state: State): Action
-  └── 1. Auto-fold check (autoFoldLogic.ts)
-  └── 2. If postflop: log hand strength diagnostics
-  └── 3. Delegate to ifThenElseAi.ts
+botLoop():
+  └── 1. Check if it's our turn (isMyTurn())
+  └── 2. Scrape game state from DOM (getState())
+  └── 3. Get action from AI (getAction())
+        ├── Auto-fold check (autoFoldLogic.ts)
+        ├── If postflop: log hand strength diagnostics
+        └── Delegate to ifThenElseAi.ts
+  └── 4. Sanitize the AI action (sanitizeAction())
+  └── 5. Log the action + state snapshot (logger.log())
+  └── 6. Perform the action / fold (performAction())
 ```
+
+The logger is called every tick after `sanitizeAction()` — it records the sanitized action, hole cards, board, and pot.
+
+### Visibility-Adaptive Polling
+
+Both the bot loop and the independent preflop watcher adjust their polling interval based on tab visibility:
+
+```typescript
+if tab visible    → interval = 500ms  (responsive play)
+if tab hidden     → interval = 1000ms (avoids Chrome throttling)
+```
+
+A `visibilitychange` listener (`main.ts:updateIntervalsBasedOnVisibility`) dynamically switches the interval when the user switches tabs. The preflop watcher uses **recursive `setTimeout`** rather than `setInterval` so the cadence actually updates when the variable changes (setInterval freezes its period at creation time).
+
+### Running in the Background (Background Window)
+
+Chrome aggressively throttles hidden tabs — clamping `setTimeout`/`setInterval` to ≥1000ms and progressively freezing them. Even at 1000ms, a hidden tab will eventually pause entirely.
+
+To run the bot indefinitely without throttling, the popup has a **"background window"** button (`src/pages/popup.ts`). It opens PokerNow in a small dedicated window via `chrome.windows.create({ type: 'normal', width: 480, height: 720, focused: false })`.
+
+Why this works: Chrome only throttles *hidden tabs*, not separate windows. A minimized/overlapped window is still "visible" from Chrome's perspective, so timers fire at full speed. Minimize the window and leave it open — the bot will keep playing indefinitely.
+
+### Bot Loop Resilience
+
+`botLoop` (`main.ts`) is wrapped in a try/catch that **always reschedules** the next tick, even if state scraping, AI evaluation, or DOM clicks throw. This prevents the loop from silently dying after a transient error (which previously caused the bot to "stop after 3 hands").
+
+The recursive `setTimeout`'s id is always stored in `botLoopTimeout`, so `kill bot` actually stops the loop, even when it is mid-turn.
+
+### Independent Preflop Watcher
+
+In addition to the bot loop, `main.ts` runs a separate `preflopWatcher` interval that fires independently of whether the bot is active:
+
+```
+preflopWatcher():
+  └── 1. Scrape game state (getState())
+  └── 2. Call maybeBeepForHand(state)
+        └── playBeepForHand() — beeps once per new hand NOT in the fold set
+```
+
+This lets the user hear a beep when they pick up a playable hand even when the bot is stopped, so they can choose to play manually. It also uses the adaptive visibility-based interval (500ms/1000ms).
 
 ---
 
@@ -162,10 +251,12 @@ Probabilities are normalized to sum to 1. Action chosen by random roll.
 
 **Features**:
 - Logs game state snapshots: timestamp, action, hand, board, pot
-- `log(action, state)` - Called on each decision
-- `getLogs()` - Retrieve all entries
+- `log(action, state)` - Called on each decision in the bot loop
+- `getLogs()` - Retrieve all entries programmatically
 - `clear()` - Reset log
 - `download(filename?)` - **Downloads JSON log via `chrome.downloads.download()`** (requires `"downloads"` permission in manifest)
+
+**Access via Popup**: The "download logs" button in the extension popup sends a `"download_logs"` message to the content script, which calls `logger.download()`. The file saves as `pokerlog_<timestamp>.json`.
 
 **LogEntry Structure**:
 ```typescript
@@ -190,7 +281,7 @@ logger.log(sanitizedAction, state);
 **Manifest Requirement** (`public/manifest.json`):
 ```json
 {
-  "permissions": ["storage", "downloads", "activeTab", "scripting"]
+  "permissions": ["storage", "downloads"]
 }
 ```
 
@@ -203,6 +294,8 @@ logger.log(sanitizedAction, state);
 - Click to toggle hands in fold set
 - Persists to `chrome.storage.local`
 - Debug panel shows fold count, last folded hand, last beeped hand
+- **Download logs button** — sends `"download_logs"` message to content script to trigger `logger.download()`
+- **Background window button** — opens PokerNow in a small dedicated window via `chrome.windows.create` so the bot runs indefinitely without Chrome's background-tab throttling
 
 ---
 
@@ -366,12 +459,20 @@ Shows both preflop and postflop scenarios with full explanation report.
 ## Installation & Usage
 
 ### Chrome Extension
+
 ```bash
 npm install
 npm run build
-# Load `dist/` folder as unpacked extension in Chrome
-# Navigate to pokernow.club, open popup, configure fold grid, click "Start Bot"
+# Load `dist/` folder as unpacked extension in chrome://extensions
 ```
+
+1. Navigate to `https://www.pokernow.club` and join a table.
+2. Re-open the extension's popup (click the toolbar icon).
+3. **For long-running background play:** click **"background window"** to open PokerNow in a small dedicated 480×720 window. Chrome throttles hidden tabs aggressively, but not separate windows — so the bot will keep playing indefinitely. Minimize the window and leave it open.
+4. Configure your **fold set** in the red/green grid (defaults to a tight range).
+5. Click **"start bot"**. The bot will fold anything red, play anything green, and use probabilistic postflop play for hands it gets to play.
+6. Click **"download logs"** any time to dump the in-memory session log as JSON.
+7. Click **"kill bot"** to stop.
 
 ### Python Assistant
 ```bash
