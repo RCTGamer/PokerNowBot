@@ -1,0 +1,31 @@
+# PokerBot Explainable Configuration
+
+# Hand evaluation settings
+hand_evaluation:
+  use_treys: true          # Use treys library for hand ranking
+  MonteCarloSamples: 1000  # For equity estimation (if used)
+
+# Decision making
+decision:
+  mode: heuristic          # heuristic | mcts | cfr (future)
+  heuristic:
+    preflop_chart_path: config/preflop_chart.yaml
+    postflop_weights:
+      hand_strength: 0.4
+      pot_odds: 0.3
+      position: 0.2
+      stack_to_pot_ratio: 0.1
+
+# Explainability
+explainability:
+  log_level: INFO          # DEBUG, INFO, WARNING, ERROR
+  format: json             # json or text
+  output_dir: logs
+  include_alternatives: true
+  confidence_threshold: 0.6
+
+# Game settings
+game:
+  blinds: [1, 2]           # [small_blind, big_blind]
+  starting_stack: 100
+  max_players: 6
