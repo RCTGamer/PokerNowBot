@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "Pokernow Bot",
     "description": "Base Level Extension",
-    "version": "5.1.3",
+    "version": "5.1.4",
     "action": {
       "default_popup": "popup.html"
     },
