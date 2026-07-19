@@ -11,6 +11,7 @@ module.exports = {
         popup: './src/pages/popup.ts',
         main: './src/main.ts',
         debug: './src/debug.ts',
+        background: './src/background.ts',
     },
     module: {
         rules: [{

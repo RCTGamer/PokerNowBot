@@ -11,6 +11,9 @@
         "https://www.pokernow.club/*",
         "https://www.pokernow.com/*"
     ],
+    "background": {
+      "service_worker": "background.js"
+    },
     "content_scripts": [{
       "matches": ["https://www.pokernow.club/*", "https://www.pokernow.com/*"],
       "js": ["main.js", "debug.js"]
