@@ -72,19 +72,19 @@ function sendMessage(message: ChromeMessage, callback?: (response: any) => void)
 }
 
 document.getElementById("start-bot")?.addEventListener("click", () => {
-    sendMessage("start_bot");
+    sendMessage({ type: "start_bot" });
 });
 
 document.getElementById("kill-bot")?.addEventListener("click", () => {
-    sendMessage("kill_bot");
+    sendMessage({ type: "kill_bot" });
 });
 
 document.getElementById("debug-bot")?.addEventListener("click", () => {
-    sendMessage("open_debug");
+    sendMessage({ type: "open_debug" });
 });
 
 document.getElementById("download-logs")?.addEventListener("click", () => {
-    sendMessage("download_logs");
+    sendMessage({ type: "download_logs" });
 });
 
 /**
