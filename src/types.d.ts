@@ -1,3 +1,4 @@
+type PositionName = "ep" | "mp" | "lp" | "dealer" | "sb" | "bb";
 type ActionType = "check_or_fold" | "call" | "raise";
 // type RaiseAmount = "min" | "1/2_pot" | "3/4_pot" | "pot" | "overbet" | "all_in";
 type RaiseAmount = "min" | "1/2_pot" | "pot" | "all_in";
@@ -142,4 +143,13 @@ type State = {
      * The amount of chips you need to call. Zero if you go first or if the opponent checked.
      */
     toCall: number,
+    /**
+     * Your position relative to the dealer: early (ep), middle (mp), late (lp),
+     * dealer, small blind (sb), or big blind (bb).
+     */
+    position: PositionName,
+    /**
+     * Number of active players at the table.
+     */
+    numPlayers: number,
 };

@@ -1,14 +1,10 @@
 import { PreflopPhase } from "../state";
 import { findBestGapStraight, getPairs, isOneCardFlushPossible, isOneCardStraightPossible, isOpenEndedStraightPresent } from "./aiUtils";
 import { ifThenElseAction } from "./ifThenElse/ifThenElseAi";
-import { calculateFoldAction } from "./autoFoldLogic"; // <-- New import
+import { calculateFoldAction } from "./autoFoldLogic";
 
 export function getAction(state: State): Action {
-    // 1. HIGH PRIORITY SAFETY CHECK: Auto-fold mechanism
-    const foldCheck = calculateFoldAction(state);
-    if (foldCheck) {
-        return foldCheck;
-    }
+    // Auto-fold logic removed - go straight to standard decision flow
 
     // Existing logging and decision flow...
     if (state.phase.code > PreflopPhase.code) {
@@ -22,6 +18,6 @@ export function getAction(state: State): Action {
         });
     }
 
-    // 2. STANDARD DECISION FLOW
+    // STANDARD DECISION FLOW
     return ifThenElseAction(state);
 }

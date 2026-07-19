@@ -1,23 +1,11 @@
 /**
  * @module autoFoldLogic
- * @description Preflop auto-fold + soft "your-turn" beep. The two decisions
- * for a NEW preflop hand are co-located here so the popup's red/green grid is
- * the single source of truth:
- *
- *   - hand key is in `foldSet` (red cell)  → auto-fold on the bot's turn
- *   - hand key is NOT in `foldSet` (green) → call playBeep() once so the user
- *                                            knows to make a manual decision
- *
- * The fold set is stored in module state, refreshed by main.ts when
- * chrome.storage.local changes. The beep volume is owned by beep.ts.
- *
- * On any post-flop street this module is a no-op — the regular decision flow
- * handles those.
+ * @description Manages the fold set for preflop hands. The beep and auto-fold
+ * functionality has been removed as part of the preflop strategy rebuild.
  */
 
 import { PreflopPhase } from "../state";
 import { encodeHand, DEFAULT_PLAYABLE_HANDS } from "./preflopHand";
-import { playBeep } from "../beep";
 
 /**
  * Enumerates all 169 canonical preflop hands. Order:
@@ -67,7 +55,7 @@ let foldSet: Set<string> = new Set(
 );
 
 /**
- * Replace the in-memory fold set. Called by main.ts on startup and on
+ * Replace the in-memory fold set. Called by popup.ts on startup and on
  * chrome.storage changes.
  */
 export function setFoldSet(keys: Iterable<string>) {
@@ -82,93 +70,44 @@ export function getFoldSet(): string[] {
 }
 
 /**
- * Returns true if the given hand should be auto-folded preflop.
+ * Returns true if the given hand should be considered for folding preflop.
  * Always returns false outside the preflop phase.
+ *
+ * Note: This function is kept for compatibility but always returns false
+ * since auto-fold logic has been removed from the decision flow.
  */
 export function shouldAutoFold(hand: Card[]): boolean {
-    if (hand.length !== 2) return false;
-    return foldSet.has(encodeHand(hand));
+    // Auto-fold logic removed - always return false
+    return false;
 }
 
 /**
- * Returns a fold action if the current state warrants an immediate auto-fold,
- * otherwise null so the calling AI can proceed with its normal decision flow.
+ * Returns null since auto-fold action has been removed.
+ * Kept for compatibility with any remaining imports.
  */
-export function calculateFoldAction(state: State): Action | null {
-    // Only act preflop — this is an auto-fold-preflop bot.
-    if (state.phase.code !== PreflopPhase.code) {
-        return null;
-    }
-
-    if (state.hand.length !== 2) {
-        return null;
-    }
-
-    if (shouldAutoFold(state.hand)) {
-        return { type: "check_or_fold" };
-    }
-
+export function calculateFoldAction(state: State): null {
     return null;
 }
 
-// ---------------------------------------------------------------------------
-// Beep
-// ---------------------------------------------------------------------------
-
 /**
- * Tracks the hand key we last evaluated so we don't beep on every 500ms tick
- * while the user stares at the same hole cards. Reset by `resetBeepTracker()`
- * when the bot stops (or on first call).
+ * Sets the beep-enabled flag. Kept for compatibility but beep functionality
+ * has been removed.
  */
-let lastBeepedHandKey: string | undefined;
-
-/**
- * Toggled by main.ts in response to the popup's "beep on hands you play"
- * checkbox. Defaults to true to match the previous main.ts behaviour.
- */
-let beepEnabled = true;
-
-/** Replace the in-memory beep-enabled flag. Called by main.ts on storage changes. */
 export function setBeepEnabled(enabled: boolean) {
-    beepEnabled = !!enabled;
-}
-
-/** Forget the last hand key we beeped for. Call when the bot stops. */
-export function resetBeepTracker() {
-    lastBeepedHandKey = undefined;
+    // Beep functionality removed
 }
 
 /**
- * On each tick, when a NEW preflop hand appears, decide once:
- *   - red  (hand in fold set)  → silence (the bot will auto-fold; see
- *                                 calculateFoldAction). The popup calls the
- *                                 fold button via performAction().
- *   - green (hand NOT in fold set) → call playBeep() once so the user knows
- *                                     to make a manual decision.
- *
- * "New" is defined as a hand key that differs from the last one we evaluated,
- * so re-ticks of the same hand don't re-beep.
- *
- * @returns the hand key that was beeped for, or null if no beep was played.
+ * Resets the beep tracker. Kept for compatibility.
  */
-export function playBeepForHand(state: State): string | null {
-    if (!beepEnabled)
-        return null;
+export function resetBeepTracker() {
+    // Beep functionality removed
+}
 
-    if (state.phase.code !== PreflopPhase.code)
-        return null;
-    if (state.hand.length !== 2)
-        return null;
-
-    const handKey = encodeHand(state.hand);
-
-    if (handKey === lastBeepedHandKey)
-        return null;
-    lastBeepedHandKey = handKey;
-
-    if (shouldAutoFold(state.hand))
-        return null; // red cell → bot will fold; stay silent
-
-    // playBeep(); // Beep removed as requested
-    return handKey;
+/**
+ * Returns null since beep functionality has been removed.
+ * Kept for compatibility.
+ */
+export function playBeepForHand(state: State): null {
+    return null;
 }

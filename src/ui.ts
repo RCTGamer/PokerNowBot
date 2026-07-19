@@ -101,9 +101,85 @@ export function getPrevPhasePot() {
     return parseInt(prevPotText ?? "0");
 }
 
+/**
+ * Counts active (non-empty) players at the table.
+ * An active player has a name element and/or a non-zero stack.
+ */
+export function getNumPlayers(): number {
+    const players = document.querySelectorAll('.table-player');
+    let count = 0;
+    for (const p of players) {
+        // Skip empty seats
+        if (p.classList.contains('empty')) continue;
+        const stack = p.querySelector('.table-player-stack');
+        const name = p.querySelector('.name, .table-player-name, .player-name');
+        if (name && name.textContent && name.textContent.trim().length > 0)
+            count++;
+        else if (stack && stack.textContent && parseInt(stack.textContent) > 0)
+            count++;
+    }
+    return count || players.length; // fallback: total non-empty elements
+}
+
+/**
+ * Determines your position relative to the dealer.
+ *
+ * Scans active (non-empty) player elements in DOM order, finds the dealer
+ * chip and your seat, then calculates seats-from-dealer clockwise.
+ *
+ * @returns PositionName: "ep" | "mp" | "lp" | "dealer" | "sb" | "bb"
+ */
+export function getPosition(numPlayers: number): PositionName {
+    const players = document.querySelectorAll('.table-player');
+    let yourIdx = -1;
+    let dealerIdx = -1;
+    let activeIdx = 0;
+
+    for (const p of players) {
+        if (p.classList.contains('empty')) continue;
+        const name = p.querySelector('.name, .table-player-name, .player-name');
+        const isEmpty = !name || !name.textContent || name.textContent.trim().length === 0;
+        if (isEmpty) continue;
+
+        if (p.classList.contains('you-player'))
+            yourIdx = activeIdx;
+
+        if (p.querySelector('.dealer-chip, .dealer-button, .dealer'))
+            dealerIdx = activeIdx;
+
+        activeIdx++;
+    }
+
+    // Fallback if we can't determine position
+    if (yourIdx < 0 || dealerIdx < 0 || activeIdx < 2)
+        return 'ep';
+
+    // Seats from dealer clockwise (0 = dealer)
+    const sfd = (yourIdx - dealerIdx + activeIdx) % activeIdx;
+
+    if (sfd === 0) return 'dealer';
+    if (sfd === 1) return 'sb';
+    if (sfd === 2) return 'bb';
+
+    const remaining = activeIdx - 3; // seats after blinds
+
+    // Last seat before dealer = cutoff (late position)
+    if (sfd === activeIdx - 1) return 'lp';
+    // Second-to-last = hijack (late position for our purposes)
+    if (remaining >= 4 && sfd === activeIdx - 2) return 'lp';
+
+    // Divide the rest: ~40% early, ~60% middle
+    const epCutoff = Math.max(1, Math.floor(remaining * 0.4));
+    const rel = sfd - 3; // 0-indexed into non-blind positions
+
+    if (rel < epCutoff) return 'ep';
+    return 'mp';
+}
+
 export function getState(): State {
     const hand = getHandCards();
     const board = getBoardCards();
+    const numPlayers = getNumPlayers();
 
     return {
         phase: getPhase(),
@@ -116,6 +192,8 @@ export function getState(): State {
         pot: getTotalPot(),
         prevPhasePot: getPrevPhasePot(),
         toCall: getToCallValue(),
+        position: getPosition(numPlayers),
+        numPlayers,
     };
 }
 

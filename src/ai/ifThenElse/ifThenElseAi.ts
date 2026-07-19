@@ -4,7 +4,7 @@ import { flushAction } from "./flushAction";
 import { bestHandAction, bluffHandAction } from "./handActions";
 import { highCardAction } from "./highCardAction";
 import { pairAction } from "./pairAction";
-import { preflopAction } from "./preflopActions";
+import { preflopAction } from "../preflopStrategy";
 import { straightAction } from "./straightAction";
 import { threeAction } from "./threeAction";
 import { twoPairAction } from "./twoPairAction";
