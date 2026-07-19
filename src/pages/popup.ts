@@ -21,9 +21,10 @@ document.addEventListener("DOMContentLoaded", () => {
  *    properties of undefined (reading 'foldCount')" errors — exactly
  *    what the bug report was.
  *  - The popup's "Background window" button intentionally opens
- *    PokerNow in a *separate* window so the bot can keep running; that
- *    window is invisible to `currentWindow: true` queries. Searching by
- *    URL across all windows is the only way to reliably find it.
+ *    PokerNow in a small dedicated window so the bot keeps running
+ *    even when you switch tabs. The window is intentionally visible from
+ *    Chrome's perspective to avoid background-tab throttling; you can
+ *    minimize it but keep it open.
  *
  * Why we always supply a callback to `chrome.tabs.sendMessage`:
  *
@@ -88,7 +89,7 @@ document.getElementById("download-logs")?.addEventListener("click", () => {
 
 /**
  * "Background window" — opens PokerNow in a small dedicated window so the bot
- * keeps running even when the user switches tabs. Chrome aggressively throttles
+ * keeps running even when you switch tabs. Chrome aggressively throttles
  * hidden tabs (clamps timers to >=1s and progressively freezes them); a normal
  * window is not classified as a background tab and stays responsive. The user
  * can minimize the window, but must keep it open.
@@ -133,7 +134,7 @@ setInterval(
         });
         sendMessage("get_debug", (response: BotDebug) => {
             if (response === undefined) return;
-            const text = response.foldCount === 0 && response.lastBeepKey === null
+            const text = response.foldCount === 0 && response.lastFoldKey === null
                 ? "—"
                 : `folds=${response.foldCount}` +
                   (response.lastFoldKey ? ` last=${response.lastFoldKey}` : "");

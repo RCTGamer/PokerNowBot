@@ -1,7 +1,8 @@
+// AI decision making for the PokerNowBot Chrome extension
 import { PreflopPhase } from "../state";
 import { findBestGapStraight, getPairs, isOneCardFlushPossible, isOneCardStraightPossible, isOpenEndedStraightPresent } from "./aiUtils";
 import { ifThenElseAction } from "./ifThenElse/ifThenElseAi";
-import { calculateFoldAction } from "./autoFoldLogic";
+import { preflopAction } from "./preflopStrategy";
 
 export function getAction(state: State): Action {
     // Auto-fold logic removed - go straight to standard decision flow
