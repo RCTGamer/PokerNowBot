@@ -5,6 +5,7 @@ import { performAction, sanitizeAction, onAction } from "./action";
 import { showDebugPanel } from "./debug";
 import { Logger } from "./logger";
 import { encodeHand } from "./ai/preflopHand";
+import { setFoldSet, getFoldSet, resetBeepTracker } from "./ai/autoFoldLogic";
 
 console.log("Content script loading...");
 
